@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 
 import java.nio.charset.StandardCharsets;
@@ -20,52 +21,39 @@ public class PasswordPolicy {
 
     private static final String PREFS_NAME = "password-token";
     private static final String TOKEN_NAME = "token";
-    private static final int REQUEST_CONFIRM_CREDENTIAL = 1;
-
-    private static KeyguardManager mKeyguardMgr;
+    public static final int REQUEST_CONFIRM_CREDENTIAL = 1;
 
     @TargetApi(Build.VERSION_CODES.M)
     public static void resetPassword(Activity activity, String password) {
-        mKeyguardMgr = activity.getSystemService(KeyguardManager.class);
         ComponentName component = DeviceAdminReceiver.component(activity);
         DevicePolicyManager policyManager = (DevicePolicyManager) activity.getSystemService(Context.DEVICE_POLICY_SERVICE);
         policyManager.setPasswordQuality(component, DevicePolicyManager.PASSWORD_QUALITY_UNSPECIFIED);
         policyManager.setPasswordMinimumLength(component, 0);
-        boolean success = false;
-        boolean active;
+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            byte[] token = loadPasswordResetTokenFromPreference(activity);
             try {
-                password = "";
-                if(token == null) token = generateRandomPasswordToken();
-
-                policyManager.setResetPasswordToken(DeviceAdminReceiver.component(activity), token);
-
-
-                success = policyManager.resetPasswordWithToken(DeviceAdminReceiver.component(activity), password, token, 0);
-                if(success) savePasswordResetTokenToPreference(activity, token);
-
-
-                active = policyManager.isResetPasswordTokenActive(DeviceAdminReceiver.component(activity));
-                if(!active) activatePasswordToken(activity);
-
-
-
-
-            }catch (Exception e){
-                Log.v(PasswordPolicy.class.getName() , e.getMessage());
+                byte[] token = loadPasswordResetTokenFromPreference(activity);
+                if (token == null) {
+                    token = generateRandomPasswordToken();
+                    if(policyManager.setResetPasswordToken(DeviceAdminReceiver.component(activity), token))
+                                    savePasswordResetTokenToPreference(activity, token);
+                }
+                if (policyManager.isResetPasswordTokenActive(DeviceAdminReceiver.component(activity))) {
+                    policyManager.resetPasswordWithToken(DeviceAdminReceiver.component(activity.getApplicationContext()), password, token, 0);
+                } else {
+                    activatePasswordToken(activity);
+                }
+            } catch (Exception e) {
+                Log.v(PasswordPolicy.class.getName(), e.getMessage());
             }
-        }else{
-            success = policyManager.resetPassword(password, DevicePolicyManager.RESET_PASSWORD_REQUIRE_ENTRY);
         }
-        Log.d("Device password changed", String.valueOf(success));
     }
 
     public static byte[] generateRandomPasswordToken() {
         try {
             return SecureRandom.getInstance("SHA1PRNG").generateSeed(32);
         } catch (NoSuchAlgorithmException e) {
-            Log.v(PasswordPolicy.class.getName() , e.getMessage());
+            Log.v(PasswordPolicy.class.getName(), e.getMessage());
             return null;
         }
     }
@@ -96,9 +84,12 @@ public class PasswordPolicy {
         }
     }
 
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    static final String ACTIVATE_TOKEN_PROMPT = "Use your credentials to enable remote password reset";
+
+    @TargetApi(Build.VERSION_CODES.M)
     private static void activatePasswordToken(Activity activity) {
-        Intent intent = mKeyguardMgr.createConfirmDeviceCredentialIntent(null, null);
+        KeyguardManager mKeyguardMgr = activity.getSystemService(KeyguardManager.class);
+        Intent intent = mKeyguardMgr.createConfirmDeviceCredentialIntent(null, ACTIVATE_TOKEN_PROMPT);
         if (intent != null) {
             activity.startActivityForResult(intent, REQUEST_CONFIRM_CREDENTIAL);
         }
